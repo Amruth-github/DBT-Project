@@ -1,31 +1,77 @@
-from json import loads  
-from kafka import KafkaConsumer  
-from pymongo import MongoClient 
+from pyspark.sql.functions import from_json, col
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType
+from pyspark.sql import SparkSession
+from flask import Flask, render_template
+from threading import *
+import pandas as pd
+schema = StructType([
+    StructField("id", StringType(), True),
+    StructField("sentiment", StringType(), True),
+    StructField("hashtag", StringType(), True)
+])
+spark = SparkSession \
+    .builder \
+    .appName("KafkaStreaming") \
+    .getOrCreate()
 
-# generating the Kafka Consumer  
-my_consumer = KafkaConsumer(  
-    'mytopic',  
-     bootstrap_servers = ['localhost : 9092'],  
-     auto_offset_reset = 'earliest',  
-     enable_auto_commit = True,  
-     group_id = 'my-group',  
-     value_deserializer = lambda x : loads(x.decode('utf-8'))  
-     )  
+df = spark.readStream \
+         .format("kafka") \
+         .option("kafka.bootstrap.servers", "localhost:9092") \
+         .option("subscribe", "sentiment") \
+         .option("startingOffsets", "earliest") \
+         .load() \
+         .selectExpr("CAST(value AS STRING)") \
+         .select(from_json(col("value"), schema).alias("data")) \
+         .select("data.*")
 
-"""
-uri = "mongodb+srv://JavaFX:AkArshj21@javafx.qe7bf3c.mongodb.net/?retryWrites=true&w=majority"
-# Create a new client and connect to the server
-my_client = MongoClient(uri)
-# Send a ping to confirm a successful connection
-try:
-    my_client.admin.command('ping')
-    print("Pinged your deployment. You successfully connected to MongoDB!")
-except Exception as e:
-    print(e)
 
-my_collection = my_client.linuxhint.linuxhint"""
+query = df.writeStream \
+          .format("console") \
+          .outputMode("append") \
+          .start()
+          
+          
+          
+sentiment_count = dict()
+def process_batch(batch_df, batch_id):
+    # Get the sentiment count as a dictionary
+    global sentiment_count
+    sentiment_count = (
+        batch_df.groupBy('Sentiment')
+        .count()
+        .rdd.map(lambda x: (x['Sentiment'], x['count']))
+        .collectAsMap()
+    )
 
-for message in my_consumer:  
-    message = message.value  
-    #collection.insert_one(message)  
-    print(str(message) + " added to ")
+app = Flask(__name__)
+# Define the route to the dashboard
+@app.route("/")
+def dashboard():
+	# Read data from Kafka
+
+
+	# Convert the sentiment count DataFrame to a Pandas DataFrame
+	sentiment_count_pd = pd.DataFrame.from_dict(sentiment_count)
+
+	# Create a pie chart of the sentiment count
+	plt.pie(sentiment_count_pd["count"], labels=["Negative", "Positive"])
+	plt.title("Sentiment Analysis")
+	plt.show()
+
+	# Render the HTML template with the pie chart and tweet count
+	return render_template("dashboard.html", sentiment_count=sentiment_count_pd, tweet_count=0)
+     
+t1 = Thread(target = app.run, kwargs={'host': 'localhost', 'port': 5000})
+t1.start()     
+
+query_sentiment = (
+    df.writeStream
+    .foreachBatch(process_batch)
+    .start()
+)
+
+query_sentiment.awaitTermination()
+
+query.awaitTermination()
+spark.stop()
+
