@@ -15,11 +15,15 @@ myclient = pymongo.MongoClient("mongodb://localhost:27017/")
 mydb = myclient["Kafka"]
 mycol = mydb["Batch_results"]
 
-schema = StructType([
-    StructField("id", StringType(), True),
-    StructField("sentiment", StringType(), True),
-    StructField("hashtag", StringType(), True)
+schema_id = StructType([
+    StructField("id", StringType(), True)
+    
 ])
+
+schema_sentiment = StructType([StructField("sentiment", StringType(), True)])
+
+schema_hashtag = StructType([StructField("hashtag", StringType(), True)])
+
 spark = SparkSession \
     .builder \
     .appName("KafkaStreaming") \
@@ -30,31 +34,65 @@ spark.sparkContext.setLogLevel("WARN")
 
 sentiment_dict = {"positive": 0, "negative": 0}
 
-df = spark.readStream \
+hash_tag_dict = dict()
+
+tweet_count = 0
+
+
+df_id = spark.readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", "localhost:9092") \
+    .option("subscribe", "id") \
+    .option("startingOffsets", "earliest") \
+    .load() \
+    .selectExpr("CAST(value AS STRING)") \
+    .select(from_json(col("value"), schema_id).alias("data")) \
+    .select("data.*")
+
+df_hashtag = spark.readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", "localhost:9092") \
+    .option("subscribe", "hashtag") \
+    .option("startingOffsets", "earliest") \
+    .load() \
+    .selectExpr("CAST(value AS STRING)") \
+    .select(from_json(col("value"), schema_hashtag).alias("data")) \
+    .select("data.*")
+
+df_sentiment = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:9092") \
     .option("subscribe", "sentiment") \
     .option("startingOffsets", "earliest") \
+    .option("kafka.group.id", "consumer")\
     .load() \
     .selectExpr("CAST(value AS STRING)") \
-    .select(from_json(col("value"), schema).alias("data")) \
+    .select(from_json(col("value"), schema_sentiment).alias("data")) \
     .select("data.*")
 
 
-query = df.writeStream \
-          .format("console") \
-          .outputMode("append") \
-          .start()
+def process_batch_hashtag(batch_df, batch_id):
+    global hash_tag_dict
+    hash_tag_dict_l = (
+        batch_df.groupby('hashtag')
+        .count()
+        .rdd.map(lambda x: (x['hashtag'], x['count']))
+        .collectAsMap()
+    )
+    for i in hash_tag_dict_l.keys():
+        if i not in hash_tag_dict:
+            hash_tag_dict[i] = hash_tag_dict_l[i]
+        else:
+            hash_tag_dict[i] += hash_tag_dict_l[i]
+    mydb["hash_tags"].delete_many({})
+    mydb["hash_tags"].insert_one(hash_tag_dict)
 
-print(query)
+def process_batch_tweet(batch_df, batch_id):
+    global tweet_count
+    tweet_count += batch_df.count()
 
-
-sentiment_count = dict()
-
-
-def process_batch(batch_df, batch_id):
+def process_batch_sentiment(batch_df, batch_id):
     # Get the sentiment count as a dictionary
-    global sentiment_count
     sentiment_count = (
         batch_df.groupBy('sentiment')
         .count()
@@ -71,13 +109,25 @@ def process_batch(batch_df, batch_id):
         mycol.insert_one(to_insert)
     
 query_sentiment = (
-    df.writeStream
-    .foreachBatch(process_batch)
+    df_sentiment.writeStream
+    .foreachBatch(process_batch_sentiment)
+    .start()
+)
+
+query_hashtag = (
+    df_hashtag.writeStream
+    .foreachBatch(process_batch_hashtag)
+    .start()
+)
+query_count_tweet = (
+    df_hashtag.writeStream
+    .foreachBatch(process_batch_tweet)
     .start()
 )
 
 query_sentiment.awaitTermination()
+query_hashtag.awaitTermination()
+query_count_tweet.awaitTermination()
 
-query.awaitTermination()
 spark.stop()
 

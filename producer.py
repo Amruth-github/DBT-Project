@@ -15,7 +15,9 @@ producer = KafkaProducer(
 
 
 def publish_tweet(tweet):
-    producer.send("sentiment", value=tweet)
+    producer.send("sentiment", value={"sentiment" : tweet["sentiment"]})
+    producer.send("hashtag", value = {"hashtag" : tweet["hashtag"]})
+    producer.send("id", value = {"id" : tweet["id"]})
 
 
 # Read tweets from a file or stream
