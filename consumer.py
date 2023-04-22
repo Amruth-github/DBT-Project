@@ -13,6 +13,8 @@ spark = SparkSession \
     .builder \
     .appName("KafkaStreaming") \
     .getOrCreate()
+   
+spark.sparkContext.setLogLevel("WARN")
 
 df = spark.readStream \
          .format("kafka") \
@@ -29,7 +31,8 @@ query = df.writeStream \
           .format("console") \
           .outputMode("append") \
           .start()
-          
+
+print(query);
           
           
 sentiment_count = dict()
@@ -37,32 +40,13 @@ def process_batch(batch_df, batch_id):
     # Get the sentiment count as a dictionary
     global sentiment_count
     sentiment_count = (
-        batch_df.groupBy('Sentiment')
+        batch_df.groupBy('hashtag')
         .count()
-        .rdd.map(lambda x: (x['Sentiment'], x['count']))
+        .rdd.map(lambda x: (x['hashtag'], x['count']))
         .collectAsMap()
     )
-
-app = Flask(__name__)
-# Define the route to the dashboard
-@app.route("/")
-def dashboard():
-	# Read data from Kafka
-
-
-	# Convert the sentiment count DataFrame to a Pandas DataFrame
-	sentiment_count_pd = pd.DataFrame.from_dict(sentiment_count)
-
-	# Create a pie chart of the sentiment count
-	plt.pie(sentiment_count_pd["count"], labels=["Negative", "Positive"])
-	plt.title("Sentiment Analysis")
-	plt.show()
-
-	# Render the HTML template with the pie chart and tweet count
-	return render_template("dashboard.html", sentiment_count=sentiment_count_pd, tweet_count=0)
-     
-t1 = Thread(target = app.run, kwargs={'host': 'localhost', 'port': 5000})
-t1.start()     
+    print(sentiment_count);
+   
 
 query_sentiment = (
     df.writeStream

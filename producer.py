@@ -30,6 +30,6 @@ if __name__ == '__main__':
             }
             print(tweet)
             publish_tweet(tweet)
-            sleep(5)
+            sleep(1)
 
 
