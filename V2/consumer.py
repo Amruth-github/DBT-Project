@@ -11,6 +11,19 @@ schema = StructType([
     StructField("issue",StringType(), True)
 ])
 
+aggregate_count = {"Traffic Hazard":0, "Crash Urgent": 0, "Crash Service": 0, "COLLISION": 0}
+
+def update_issue_counts(df, epoch_id):
+    # Aggregate the counts for each issue
+    counts = df.groupBy("issue").count().collect()
+    for row in counts:
+        issue = row["issue"]
+        count = row["count"]
+        aggregate_count[issue] += count
+    # Print the updated counts
+    print(aggregate_count)
+
+
 df = spark.readStream.format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:9092") \
     .option("subscribe","TrafficHazard,CrashUrgent,CrashService,COLLISION") \
@@ -26,7 +39,7 @@ traffic_df = s_df.select(col("data.id"),col("data.datetime"),col("data.issue"))
 
 output_df = traffic_df.select(to_json(struct(col("*"))).alias("value"))
 
-print(output_df)
+op = traffic_df.writeStream.format("console").foreachBatch(update_issue_counts).outputMode("append").start()
 
 query = output_df.writeStream.format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:9092") \
