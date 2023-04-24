@@ -14,7 +14,7 @@ producer = KafkaProducer(
 # Define a function to publish tweets to Kafka
 
 
-def publish_tweet(data,topic):
+def publish_data(data,topic):
     producer.send(topic, value=data)
 
 def publish_data_batch(data,topic):
@@ -34,7 +34,7 @@ if __name__ == '__main__':
                     "issue": str(row["Issue Reported"]),
                 }
                 print(data)
-                publish_tweet(data,data["issue"].replace(" ",""))
-                publish_tweet_batch(data,data["issue"].replace(" ",""))
+                publish_data(data,data["issue"].replace(" ",""))
+                publish_data_batch(data,data["issue"].replace(" ",""))
                 sleep(1)
 
