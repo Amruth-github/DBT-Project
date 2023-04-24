@@ -17,6 +17,10 @@ producer = KafkaProducer(
 def publish_tweet(data,topic):
     producer.send(topic, value=data)
 
+def publish_data_batch(data,topic):
+	producer.send(topic + "_batch", value=data)
+
+
 
 # Read tweets from a file or stream
 if __name__ == '__main__':
@@ -31,5 +35,6 @@ if __name__ == '__main__':
                 }
                 print(data)
                 publish_tweet(data,data["issue"].replace(" ",""))
+                publish_tweet_batch(data,data["issue"].replace(" ",""))
                 sleep(1)
 
